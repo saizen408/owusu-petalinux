@@ -1,0 +1,277 @@
+#!/bin/bash
+# container
+#
+# Handy tool for simplifying the execution of docker containers
+#
+# Eric Owusu / Mitch Overdick
+# 10/1/2023
+
+###############################################################################
+# Setup Parameters (moved to seprate file: see container-params.sample)
+###############################################################################
+if [[ -r ./container-params ]]; then
+    source container-params
+else
+    echo "must configure ./container-params file before running"
+    exit
+fi
+
+###############################################################################
+# Constants (do not edit)
+###############################################################################
+
+CONTAINER_DIR="yocto"   # Folder for container output
+# Text colors (For pretty console output)
+TEXT_RED='\033[0;31m'   # Red
+TEXT_YEL='\033[0;33m'   # Yellow
+TEXT_GRN='\033[0;32m'   # Yellow
+TEXT_NC='\033[0m'       # No Color
+
+###############################################################################
+# Computed Constants (do not edit)
+###############################################################################
+
+# Git branch name extraction
+IMAGE_NAME="owusu/petalinux:${PETALINUX_VER}"                      			
+CONTAINER_NAME="owusu_poky_${POKY_RELEASE}_$USER$CONTAINER_NAME_SUFFIX"
+
+# Find the mount point of the /yocto folder in the container:
+CONTAINER_MOUNT=$(docker inspect \
+                  -f '{{range $p := .Mounts}}{{println $p.Source}}{{end}}' \
+                  $CONTAINER_NAME \
+                  | grep -Po '^\/.+\/yocto$' \
+                  2> /dev/null)
+
+# Disk space calculations
+# Disk free space (in 1K-blocks) warning threshold (1048576*x = 1K-Blocks, where x is in GB)
+DISK_USAGE_WARNING=$((1048576*$DISK_WARNING_GB)) 
+
+###############################################################################
+# Main program code
+###############################################################################
+
+# print help dialog
+help_screen() {
+    echo -e "Usage: container [ARGS]"
+    echo -e "Run docker image \"${IMAGE_NAME}\" for yocto compilation/management"
+    echo -e ""
+    echo -e "Options:"
+    echo -e "   --help         print this message"
+    echo -e "   --pull         pull latest container from Docker Hub"
+    echo -e "   --info         print various info about the environment you're in"
+    echo -e "   [no args]      run with CLI"
+    echo -e "   --hidden       run in the background"
+    echo -e "   --stop         stop"
+}
+
+# Run docker
+run_docker() {
+    ###########################################################################
+    # Set up docker user to match current user
+    ###########################################################################
+
+    # Prevent re-run on existing container
+    ENTRYPOINT=""
+    ENTRYPOINT=$ENTRYPOINT"if cat /etc/passwd | grep -q $USER; then :; else "
+    # Add current username, id, and group to container
+    ENTRYPOINT=$ENTRYPOINT"groupadd -g $(id -g) host-users 2> /dev/null; "
+    ENTRYPOINT=$ENTRYPOINT"useradd $(whoami) -u $(id -u) -g $(id -g) -s $SHELL; "
+    ENTRYPOINT=$ENTRYPOINT"echo \"$(whoami)  ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers; "
+    # Switch from root to $USER. Add exit after to prevent falling back into root
+    ENTRYPOINT=$ENTRYPOINT"fi; "
+    ENTRYPOINT=$ENTRYPOINT"su $(whoami); "
+    ENTRYPOINT=$ENTRYPOINT"exit; "
+
+    ###########################################################################
+    # Create local folder for yoto builds if it doesn't exist already
+    ###########################################################################
+    if [ ! -d $CONTAINER_DIR ];then
+        echo "Making ./${CONTAINER_DIR} to store output to"
+        mkdir -p $CONTAINER_DIR
+    else
+        echo "Storing output to ./${CONTAINER_DIR}"
+    fi
+
+    echo -e "(Container output below)"
+    echo -e "--------------------"
+
+    ###########################################################################
+    # Fire up the container
+    ###########################################################################
+
+    # Attempt to start container in case it already has ben 'run'
+    start_docker 2> /dev/null
+    RESULT=$?
+
+    # If last command returned failure, 'run' the container
+    if [ $RESULT -ne 0 ]; then
+        # Echo container name for consistency with other behaviors
+        echo $CONTAINER_NAME
+        docker run -it \
+                   --hostname="container" \
+                   --name $CONTAINER_NAME \
+        	       -v $HOME:$HOME \
+                   -v $PWD/$CONTAINER_DIR:/yocto \
+                   -e STARTUP_CMD="$ENTRYPOINT" \
+                   $IMAGE_NAME
+    else
+        # Otherwise, attach to container
+        attach_docker
+    fi
+}
+
+# start a stopped container
+start_docker() {
+    # Running this command with --attach argument seemed to crash container
+    # after typing a command. Run `docker start` then `docker attach`
+    docker start $CONTAINER_NAME
+}
+
+# stop a started container
+stop_docker() {
+    docker stop $CONTAINER_NAME
+}
+
+# attach to running container
+attach_docker() {
+    docker attach $CONTAINER_NAME
+}
+
+get_petalinux(){
+    # Validate petalinux installer is in /installers directory
+    if [[ ! -r ./installers/${PETA_RUN_FILE} ]]; then
+        echo "Must download a valid petalinux installer into ./installers"
+        echo "Visit https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/embedded-design-tools.html"
+        exit
+    fi
+
+    if [[ $(echo "${PETA_RUN_FILE:0:10}") != "petalinux-v" ||
+            $(echo "${PETA_RUN_FILE:(-14)}") != "-installer.run" ]]; then
+        echo "Invalid petalinux installer file: ${PETA_RUN_FILE}"
+
+    fi
+
+    # Start up http server to pull in petalinux
+    if ! ps -fC python3 | grep "http.server" > /dev/null ; then
+        python3 -m "http.server" &
+        HTTPID=$!
+        echo "HTTP Server started as PID $HTTPID"
+        trap 'kill $HTTPID' EXIT QUIT SEGV INT HUP TERM ERR
+    fi
+}
+
+
+# Build Image
+build_docker() {
+    # Grab the petalinux installation
+    get_petalinux
+
+    # Start building the image
+    OLD_CONTAINER_ID=$(docker images --filter=reference=${IMAGE_NAME} --format "{{.ID}}")
+    echo "Building docker image: ${IMAGE_NAME}"
+    # Map host user to container user, required for installation of petalinux
+    docker build --build-arg DOCKER_USER=$(whoami) \
+        --build-arg U_ID=$(id -u) \
+        --build-arg G_ID=$(id -g) \
+        --build-arg PETA_RUN_FILE=${PETA_RUN_FILE} \
+        -t $IMAGE_NAME .
+
+    # Kill the http server
+    [ -n "$HTTPID" ] && kill "$HTTPID" && echo "Killed HTTP Server"
+}
+
+# Rebuild Image (Pristine build)
+rebuild_docker() {
+    # Grab the petalinux installation
+    get_petalinux
+
+    OLD_CONTAINER_ID=$(docker images --filter=reference=${IMAGE_NAME} --format "{{.ID}}")
+    echo "${TEXT_YEL}RE-${TEXT_NC}Building docker image: ${IMAGE_NAME}"
+    # Map host user to container user, required for installation of petalinux
+    docker build --build-arg DOCKER_USER=$(whoami) \
+        --no-cache \
+        --build-arg U_ID=$(id -u) \
+        --build-arg G_ID=$(id -g) \
+        --build-arg PETA_RUN_FILE=${PETA_RUN_FILE} \
+        -t $IMAGE_NAME .
+    
+    # Kill the http server
+    [ -n "$HTTPID" ] && kill "$HTTPID" && echo "Killed HTTP Server"
+}
+
+# Edit dockerfile
+edit_docker() {
+    echo -e "Opening ./Dockerfile in ${PREFERRED_EDITOR}..."
+    $PREFERRED_EDITOR ./Dockerfile
+}
+
+# Pull container from docker hub
+pull_docker() {
+    docker pull owusu/petalinux:${PETALINUX_VER}
+}
+
+# Check disk space (-q for quiet)
+disk_check() {
+    # Retrieved from: https://stackoverflow.com/questions/19703621/get-free-disk-space-with-df-to-just-display-free-space-in-kb
+    DISK_FREE=$(df . | tail -1 | awk '{print $4}')
+    DISK_FREE_GB=$(($DISK_FREE/1048576))
+
+    if [[ -z "$1" ]]; then
+        if [[ DISK_FREE -lt DISK_USAGE_WARNING ]]; then
+            echo -e "${TEXT_YEL}WARNING: Low disk space detected (<${DISK_WARNING_GB}GB free), yocto builds may fail!${TEXT_NC}"
+        else
+            echo -e "${TEXT_GRN}Disk space check passed ${DISK_FREE_GB}GB free.${TEXT_NC}"
+        fi
+    elif [[ "$1" == "-q" ]]; then
+        echo $DISK_FREE_GB
+    fi
+}
+
+# Print environment info
+print_info() {
+    DISK_FREE=$(disk_check -q)
+    echo "INFO:"
+    echo "----------"
+    echo "  Poky release:             $POKY_RELEASE"
+    echo "  Image name:               $IMAGE_NAME"
+    echo "  Container name:           $CONTAINER_NAME"
+    echo "  Container mount point:    $CONTAINER_MOUNT"
+    echo "  Disk free warning:        ${DISK_WARNING_GB}GB"
+    echo "  Disk free space:          ${DISK_FREE}GB"
+    echo ""
+}
+
+###############################################################################
+# Program main()
+###############################################################################
+
+# Script main for parsing arguments
+main() {
+    # Argument parsing
+    if [[ "--help" == "$1" ]]; then
+        # print help screen
+        help_screen
+    elif [[ "--pull" == "$1" ]]; then
+        # Pull docker image
+        pull_docker
+    elif [[ "--info" == "$1" ]]; then
+        # Show info
+        print_info
+    elif [[ "--hidden" == "$1" ]]; then
+        start_docker
+    elif [[ "--stop" == "$1" ]]; then
+        stop_docker
+    elif [[ -z "$1" ]]; then
+        # Run disk check to make sure sufficient disk space available
+        disk_check
+        run_docker
+    else
+        # print help screen
+        help_screen
+    fi
+
+    exit 0
+}
+
+# Execute main
+main "$@"

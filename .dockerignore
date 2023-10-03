@@ -1,0 +1,12 @@
+etc/**
+installers/**
+docker-build.sh
+LICENSE
+README.md
+.gitignore
+.git
+.cache
+tftpboot/
+vivado*
+*.log
+vitis*
