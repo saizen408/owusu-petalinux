@@ -1,0 +1,6 @@
+POKY_RELEASE="langdale"                                     # Poky release codename
+PETALINUX_VER="v2023.1"                                     # Petalinux Version
+PETA_RUN_FILE="petalinux-v2023.1-05012318-installer.run"    # Petalinux Installer filename
+DISK_WARNING_GB=60                                          # Disk space warning (in GB)
+CONTAINER_NAME_SUFFIX=""	                                # (Optional) suffix to append to running container name (for multiple environments on one host)
+PREFERRED_EDITOR="nano"                                     # Preferred edit to modify Dockfiles
