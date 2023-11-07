@@ -4,7 +4,7 @@ This script helps to enable a "portable" Petalinux development environment by pr
 
 # Script Dependencies
 - python3
-- http.server (`pip3 install http.sever`)
+- http.server (`pip3 install http.server`)
 - expect (`sudo apt install expect`)
 
 

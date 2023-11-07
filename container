@@ -145,8 +145,7 @@ get_petalinux(){
         exit
     fi
 
-    if [[ $(echo "${PETA_RUN_FILE:0:10}") != "petalinux-v" ||
-            $(echo "${PETA_RUN_FILE:(-14)}") != "-installer.run" ]]; then
+    if [[ $(echo "${PETA_RUN_FILE:0:10}") != "petalinux-v" ]]; then
         echo "Invalid petalinux installer file: ${PETA_RUN_FILE}"
 
     fi
@@ -254,6 +253,12 @@ main() {
     elif [[ "--pull" == "$1" ]]; then
         # Pull docker image
         pull_docker
+    elif [[ "--build" == "$1" ]]; then
+        # build docker image
+        build_docker
+     elif [[ "--rebuild" == "$1" ]]; then
+        # rebuild docker image
+        rebuild_docker
     elif [[ "--info" == "$1" ]]; then
         # Show info
         print_info
