@@ -21,6 +21,7 @@ fi
 ###############################################################################
 
 CONTAINER_DIR="yocto"   # Folder for container output
+TFTP_DIR="tftpboot"     # Folder for tftboot artifacts
 # Text colors (For pretty console output)
 TEXT_RED='\033[0;31m'   # Red
 TEXT_YEL='\033[0;33m'   # Yellow
@@ -92,12 +93,22 @@ run_docker() {
         echo "Storing output to ./${CONTAINER_DIR}"
     fi
 
-    echo -e "(Container output below)"
-    echo -e "--------------------"
+    ###########################################################################
+    # Create local folder for tftpboot artifacts if it doesn't exist already
+    ###########################################################################
+    if [ ! -d $TFTP_DIR ];then
+        echo "Making ./${TFTP_DIR} to store output to"
+        mkdir -p $TFTP_DIR
+    else
+        echo "Storing tftpboot artifacts to ./${TFTP_DIR}"
+    fi
 
     ###########################################################################
     # Fire up the container
     ###########################################################################
+
+    echo -e "(Container output below)"
+    echo -e "--------------------"
 
     # Attempt to start container in case it already has ben 'run'
     start_docker 2> /dev/null
@@ -112,6 +123,7 @@ run_docker() {
                    --name $CONTAINER_NAME \
         	       -v $HOME:$HOME \
                    -v $PWD/$CONTAINER_DIR:/yocto \
+                   -v $PWD/$TFTP_DIR:/tftpboot \
                    -e STARTUP_CMD="$ENTRYPOINT" \
                    $IMAGE_NAME
     else

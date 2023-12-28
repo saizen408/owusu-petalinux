@@ -1,4 +1,6 @@
 yocto/
+tftpboot/
+installers/
 container-params
 *.swp
 *.run

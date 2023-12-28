@@ -3,7 +3,7 @@
 # Specify Ubuntu digest to pull from
 ##############################################################
 
-FROM accretechsbs/ubuntu:22.04
+FROM ubuntu:22.04
 
 ##############################################################
 # Use DEBIAN_FRONTEND=noninteractive to avoid image build
@@ -32,7 +32,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt install -y --fix-missing \
   xterm rsync curl locales apt-utils sudo vim bash-completion screen \
   python3-subunit mesa-common-dev zstd liblz4-tool zstd net-tools \
   ca-certificates less nano bc jq bison qemu-system-arm tree libtinfo5 \
-  autoconf libncurses5-dev libncursesw5-dev zlib1g-dev tftpd libtool 
+  autoconf libncurses5-dev libncursesw5-dev zlib1g-dev tftpd libtool rlwrap
 
 RUN dpkg --add-architecture i386 && apt-get update && \
   DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
@@ -104,7 +104,7 @@ ARG PETA_RUN_FILE=petalinux-v2023.1-05012318-installer.run
 
 COPY accept-eula.sh /
 
-# run the Petalinux installer
+# Run the Petalinux installer
 RUN cd / && wget -q ${HTTP_SERV}/${PETA_RUN_FILE} && \
   chmod a+rx /${PETA_RUN_FILE} && \
   chmod a+rx /accept-eula.sh && \
@@ -114,21 +114,27 @@ RUN cd / && wget -q ${HTTP_SERV}/${PETA_RUN_FILE} && \
   sudo -u ${DOCKER_USER} -i /accept-eula.sh /${PETA_RUN_FILE} /opt/Xilinx/petalinux && \
   rm -f /${PETA_RUN_FILE} /accept-eula.sh
 
-# source petalinux upon each login of the container
+# Source petalinux upon each login of the container
 RUN echo ". /opt/Xilinx/petalinux/settings.sh" >> /etc/profile && \
     echo "/usr/sbin/in.tftpd --foreground --listen --address [::]:69 --secure /tftpboot" >> /etc/profile && \
     echo ". /etc/profile" >> /root/.profile
 
+# Modify xsdb script
+RUN sed -i 's|"$RDI_BINROOT"/unwrapped/"$RDI_PLATFORM$RDI_OPT_EXT"/rlwrap|rlwrap|g' /opt/Xilinx/petalinux/tools/xsct/bin/xsdb
+
 # Set up user environment
 ENV TERM=xterm-256color
 
-
-#Todo: Add tftp support
+# Add tftp support
 EXPOSE 69/udp
+
+# Create tftpboot dir
+RUN mkdir -p /tftpboot && \
+  chmod 755 /tftpboot
 
 # Switch to work directory
 RUN mkdir -p /yocto && \
-    chmod 755 /yocto
+  chmod 755 /yocto
     
 WORKDIR /yocto
 
